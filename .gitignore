@@ -1,0 +1,4 @@
+build/
+gradle-dist/
+gradle-8.5-bin.zip
+.gradle/
