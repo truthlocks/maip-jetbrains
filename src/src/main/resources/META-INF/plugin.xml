@@ -1,0 +1,138 @@
+<!--
+  Copyright 2026 Truthlocks Inc.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+<idea-plugin>
+    <id>com.truthlocks.maip</id>
+    <name>MAIP - Machine Identity &amp; Integrity</name>
+    <version>1.0.0</version>
+    <vendor email="support@truthlocks.com" url="https://truthlocks.com">Truthlocks Inc</vendor>
+
+    <description><![CDATA[
+        <h2>MAIP - Machine-Actionable Integrity Protocol</h2>
+        <p>Enterprise-grade machine identity, receipts, trust scores, agent management, and delegation chains for all JetBrains IDEs.</p>
+        <ul>
+            <li><strong>Receipts</strong> — Create, verify, and browse integrity receipts for code artifacts</li>
+            <li><strong>Trust Scores</strong> — Real-time trust scoring dashboard for machine agents</li>
+            <li><strong>Agent Management</strong> — Register, suspend, and revoke machine agents</li>
+            <li><strong>Auto-Receipts</strong> — Automatically generate receipts on VCS commits, file saves, and builds</li>
+            <li><strong>Delegation Chains</strong> — Inspect and audit delegation chains for any receipt</li>
+            <li><strong>Code Inspection</strong> — Detect agent IDs in source code and display trust information inline</li>
+            <li><strong>Audit Export</strong> — Export comprehensive audit reports in JSON and CSV formats</li>
+        </ul>
+        <p>Requires a Truthlocks MAIP API endpoint. Configure your API URL, tenant, and credentials in Settings &gt; Tools &gt; MAIP.</p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <h3>1.0.0</h3>
+        <ul>
+            <li>Initial release</li>
+            <li>Receipt creation, verification, and browsing</li>
+            <li>Trust score dashboard</li>
+            <li>Agent registration and management</li>
+            <li>Auto-receipt generation on VCS commits</li>
+            <li>Code inspection for agent IDs</li>
+            <li>Audit report export</li>
+        </ul>
+    ]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends optional="true" config-file="git-integration.xml">Git4Idea</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Startup activity -->
+        <postStartupActivity
+            implementation="com.truthlocks.maip.jetbrains.MAIPPlugin"/>
+
+        <!-- Application-level settings persistence -->
+        <applicationService
+            serviceImplementation="com.truthlocks.maip.jetbrains.settings.MAIPSettingsState"/>
+
+        <!-- Project-level services -->
+        <projectService
+            serviceImplementation="com.truthlocks.maip.jetbrains.services.MAIPProjectService"/>
+        <projectService
+            serviceImplementation="com.truthlocks.maip.jetbrains.services.ReceiptService"/>
+        <projectService
+            serviceImplementation="com.truthlocks.maip.jetbrains.services.TrustService"/>
+        <projectService
+            serviceImplementation="com.truthlocks.maip.jetbrains.services.AutoReceiptService"/>
+
+        <!-- Tool window -->
+        <toolWindow
+            id="MAIP"
+            anchor="right"
+            factoryClass="com.truthlocks.maip.jetbrains.toolwindow.MAIPToolWindowFactory"
+            icon="AllIcons.Actions.Shield"/>
+
+        <!-- Settings UI -->
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.truthlocks.maip.jetbrains.settings.MAIPSettingsConfigurable"
+            id="com.truthlocks.maip.settings"
+            displayName="MAIP"/>
+
+        <!-- Notification group -->
+        <notificationGroup id="MAIP Notifications" displayType="BALLOON"/>
+
+        <!-- Code inspection -->
+        <localInspection
+            language=""
+            shortName="MAIPAgentIdInspection"
+            displayName="MAIP Agent ID Trust Check"
+            groupName="MAIP"
+            enabledByDefault="true"
+            level="INFORMATION"
+            implementationClass="com.truthlocks.maip.jetbrains.inspections.AgentIdInspection"/>
+    </extensions>
+
+    <actions>
+        <group id="MAIP.Actions" text="MAIP" description="MAIP Actions" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <action id="MAIP.RegisterAgent"
+                class="com.truthlocks.maip.jetbrains.actions.RegisterAgentAction"
+                text="Register Agent"
+                description="Register a new machine agent"
+                icon="AllIcons.General.Add"/>
+            <action id="MAIP.CreateReceipt"
+                class="com.truthlocks.maip.jetbrains.actions.CreateReceiptAction"
+                text="Create Receipt"
+                description="Create a receipt for the current file"
+                icon="AllIcons.Actions.AddFile"/>
+            <action id="MAIP.VerifyReceipt"
+                class="com.truthlocks.maip.jetbrains.actions.VerifyReceiptAction"
+                text="Verify Receipt"
+                description="Verify a receipt by ID"
+                icon="AllIcons.Actions.Checked"/>
+            <action id="MAIP.ShowTrust"
+                class="com.truthlocks.maip.jetbrains.actions.ShowTrustAction"
+                text="Show Trust Score"
+                description="Show trust score for an agent"
+                icon="AllIcons.Actions.Shield"/>
+            <action id="MAIP.ExportAudit"
+                class="com.truthlocks.maip.jetbrains.actions.ExportAuditAction"
+                text="Export Audit Report"
+                description="Export audit report"
+                icon="AllIcons.ToolbarDecorator.Export"/>
+        </group>
+        <action id="MAIP.CreateReceiptContext"
+            class="com.truthlocks.maip.jetbrains.actions.CreateReceiptAction"
+            text="Create MAIP Receipt"
+            description="Create a MAIP receipt for the current file"
+            icon="AllIcons.Actions.AddFile">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
