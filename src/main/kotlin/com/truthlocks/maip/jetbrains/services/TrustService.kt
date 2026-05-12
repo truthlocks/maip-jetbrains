@@ -51,16 +51,18 @@ class TrustService(private val project: Project) {
     }
 
     /**
-     * Retrieves trust scores for all agents.
+     * Retrieves trust history for an agent.
      *
-     * @return A list of trust score JSON objects.
+     * @param agentId The agent identifier.
+     * @param limit Maximum number of history entries.
+     * @return A list of trust history JSON objects.
      */
-    suspend fun listTrustScores(): List<JsonObject> = withContext(Dispatchers.IO) {
+    suspend fun getTrustHistory(agentId: String, limit: Int = 50): List<JsonObject> = withContext(Dispatchers.IO) {
         val client = MAIPProjectService.getInstance(project).getClient() ?: return@withContext emptyList()
         try {
-            client.listTrustScores()
+            client.getTrustHistory(agentId, limit)
         } catch (e: Exception) {
-            log.warn("Failed to list trust scores", e)
+            log.warn("Failed to get trust history for $agentId", e)
             emptyList()
         }
     }
@@ -124,7 +126,7 @@ class TrustService(private val project: Project) {
          * @return The score value, or 0.0 if not present.
          */
         fun extractScore(trustObj: JsonObject?): Double {
-            return trustObj?.get("score")?.asDouble ?: 0.0
+            return trustObj?.get("trust_score")?.asDouble ?: trustObj?.get("score")?.asDouble ?: 0.0
         }
     }
 }

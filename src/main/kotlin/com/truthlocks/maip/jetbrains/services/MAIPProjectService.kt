@@ -166,7 +166,7 @@ class MAIPProjectService(private val project: Project) : Disposable {
         val apiClient = client ?: return
         scope.launch {
             try {
-                val result = apiClient.listTrustScores()
+                val result = apiClient.listAgents()
                 trustScores = result
                 listeners.forEach { it.onTrustScoresChanged(result) }
             } catch (e: Exception) {

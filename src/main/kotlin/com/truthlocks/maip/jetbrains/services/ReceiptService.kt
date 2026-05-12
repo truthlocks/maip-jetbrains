@@ -69,20 +69,20 @@ class ReceiptService(private val project: Project) {
             val desc = description ?: "Receipt for ${file.path}"
 
             val receipt = client.createReceipt(
-                receiptType = "code",
-                description = desc,
-                artifactHash = hash,
+                receiptType = "action",
+                action = desc,
                 agentId = config.agentId,
-                metadata = mapOf(
+                payload = mapOf(
                     "file_path" to file.path,
                     "file_name" to file.name,
                     "file_size" to content.size.toString(),
-                    "content_type" to (file.fileType.name)
+                    "content_type" to file.fileType.name,
+                    "artifact_hash" to hash
                 )
             )
 
             if (receipt != null) {
-                val receiptId = receipt.get("id")?.asString ?: "unknown"
+                val receiptId = receipt.get("receipt_id")?.asString ?: receipt.get("id")?.asString ?: "unknown"
                 MAIPNotifier.info(project, "MAIP Receipt Created", "Receipt ID: $receiptId")
                 MAIPProjectService.getInstance(project).refreshReceipts()
             } else {
@@ -118,11 +118,10 @@ class ReceiptService(private val project: Project) {
 
         try {
             val receipt = client.createReceipt(
-                receiptType = "commit",
-                description = "Commit: ${message.take(100)}",
-                artifactHash = commitHash,
+                receiptType = "action",
+                action = "git_commit: ${message.take(100)}",
                 agentId = config.agentId,
-                metadata = mapOf(
+                payload = mapOf(
                     "commit_hash" to commitHash,
                     "commit_message" to message,
                     "author" to author,
@@ -132,7 +131,7 @@ class ReceiptService(private val project: Project) {
             )
 
             if (receipt != null) {
-                val receiptId = receipt.get("id")?.asString ?: "unknown"
+                val receiptId = receipt.get("receipt_id")?.asString ?: receipt.get("id")?.asString ?: "unknown"
                 MAIPNotifier.info(
                     project,
                     "MAIP Commit Receipt",
@@ -187,12 +186,12 @@ class ReceiptService(private val project: Project) {
      * @param receiptId The receipt ID.
      * @return The delegation chain JSON object, or `null` on failure.
      */
-    suspend fun getDelegationChain(receiptId: String): JsonObject? = withContext(Dispatchers.IO) {
+    suspend fun getDelegationTree(agentId: String): JsonObject? = withContext(Dispatchers.IO) {
         val client = MAIPProjectService.getInstance(project).getClient() ?: return@withContext null
         try {
-            client.getDelegationChain(receiptId)
+            client.getDelegationTree(agentId)
         } catch (e: Exception) {
-            log.warn("Failed to get delegation chain for $receiptId", e)
+            log.warn("Failed to get delegation tree for $agentId", e)
             null
         }
     }

@@ -72,9 +72,9 @@ class RegisterAgentAction : AnAction() {
                 return@launch
             }
 
-            val result = client.registerAgent(name, capabilities, parentId)
+            val result = client.registerAgent(name, "tool", capabilities, parentId)
             if (result != null) {
-                val agentId = result.get("id")?.asString ?: "unknown"
+                val agentId = result.get("agent_id")?.asString ?: result.get("id")?.asString ?: "unknown"
                 MAIPNotifier.info(project, "Agent Registered", "Agent '$name' registered with ID: $agentId")
                 MAIPProjectService.getInstance(project).refreshAgents()
             } else {

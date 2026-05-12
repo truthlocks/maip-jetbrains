@@ -42,7 +42,7 @@ class MAIPSettingsState : PersistentStateComponent<MAIPSettingsState.State> {
      * Serializable state holder. Only non-secret fields are persisted here.
      */
     data class State(
-        var apiUrl: String = "https://api.truthlocks.com/maip/v1",
+        var apiUrl: String = "https://api.truthlocks.com/v1",
         var tenantId: String = "",
         var agentId: String = "",
         var autoReceiptOnCommit: Boolean = true,

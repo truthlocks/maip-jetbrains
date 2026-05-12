@@ -125,11 +125,10 @@ class AutoReceiptService(private val project: Project) : Disposable {
                 if (config.agentId.isBlank()) return@launch
 
                 client.createReceipt(
-                    receiptType = "build",
-                    description = "Build receipt: $buildId",
-                    artifactHash = buildId,
+                    receiptType = "action",
+                    action = "build: $buildId",
                     agentId = config.agentId,
-                    metadata = mapOf(
+                    payload = mapOf(
                         "artifact_path" to artifactPath,
                         "build_id" to buildId,
                         "trigger" to "build"
