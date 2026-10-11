@@ -115,7 +115,8 @@ class ShowTrustAction : AnAction() {
             }
 
             val agentLabel = JBLabel("Agent: ${this@TrustScoreDialog.title?.removePrefix("Trust Score: ") ?: "N/A"}")
-            val detailLabel = JBLabel("<html><pre>${rawJson.take(2000)}</pre></html>")
+            val escaped = rawJson.take(2000).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            val detailLabel = JBLabel("<html><pre>$escaped</pre></html>")
 
             return FormBuilder.createFormBuilder()
                 .addComponent(agentLabel, 1)

@@ -17,28 +17,30 @@
 <idea-plugin>
     <id>com.truthlocks.maip</id>
     <name>MAIP - Machine Identity &amp; Integrity</name>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <vendor email="support@truthlocks.com" url="https://truthlocks.com">Truthlocks Inc</vendor>
 
     <description><![CDATA[
         <h2>MAIP - Machine-Actionable Integrity Protocol</h2>
-        <p>Enterprise-grade machine identity, receipts, trust scores, agent management, and delegation chains for all JetBrains IDEs.</p>
+        <p>Connect a Truthlocks workspace to supported IntelliJ Platform IDEs for machine identities, integrity receipts and trust views.</p>
         <ul>
             <li><strong>Receipts</strong> — Create, verify, and browse integrity receipts for code artifacts</li>
-            <li><strong>Trust Scores</strong> — Real-time trust scoring dashboard for machine agents</li>
+            <li><strong>Trust Scores</strong> — Current scores for a sample of up to 100 agents</li>
             <li><strong>Agent Management</strong> — Register, suspend, and revoke machine agents</li>
             <li><strong>Auto-Receipts</strong> — Automatically generate receipts on VCS commits, file saves, and builds</li>
-            <li><strong>Delegation Chains</strong> — Inspect and audit delegation chains for any receipt</li>
+            <li><strong>Delegation Relationships</strong> — Inspect the associated agent tree; this does not verify delegation signatures</li>
             <li><strong>Code Inspection</strong> — Detect agent IDs in source code and display trust information inline</li>
-            <li><strong>Audit Export</strong> — Export comprehensive audit reports in JSON and CSV formats</li>
+            <li><strong>Audit Export</strong> — Request and download workspace audit exports in JSON or CSV, subject to permissions and retention policy</li>
         </ul>
-        <p>Requires a Truthlocks MAIP API endpoint. Configure your API URL, tenant, and credentials in Settings &gt; Tools &gt; MAIP.</p>
+        <p>Configure an environment-matched API URL and key in Settings &gt; Tools &gt; MAIP. Automatic receipt hooks are opt-in. Signing follows the registered agent key; the algorithm setting is descriptive metadata.</p>
     ]]></description>
 
     <change-notes><![CDATA[
-        <h3>1.0.0</h3>
+        <h3>1.1.0</h3>
         <ul>
-            <li>Initial release</li>
+            <li>Hosted API contract updates; signature-aware verification and native audit export jobs</li>
+            <li>Prevent automatic write replay and credential forwarding through redirects</li>
+            <li>Record actual Git commit identifiers; distinguish build events from artifact digests</li>
             <li>Receipt creation, verification, and browsing</li>
             <li>Trust score dashboard</li>
             <li>Agent registration and management</li>
@@ -75,7 +77,7 @@
             id="MAIP"
             anchor="right"
             factoryClass="com.truthlocks.maip.jetbrains.toolwindow.MAIPToolWindowFactory"
-            icon="AllIcons.Actions.Shield"/>
+            icon="AllIcons.Actions.Checked"/>
 
         <!-- Settings UI -->
         <applicationConfigurable
@@ -120,7 +122,7 @@
                 class="com.truthlocks.maip.jetbrains.actions.ShowTrustAction"
                 text="Show Trust Score"
                 description="Show trust score for an agent"
-                icon="AllIcons.Actions.Shield"/>
+                icon="AllIcons.Actions.Checked"/>
             <action id="MAIP.ExportAudit"
                 class="com.truthlocks.maip.jetbrains.actions.ExportAuditAction"
                 text="Export Audit Report"

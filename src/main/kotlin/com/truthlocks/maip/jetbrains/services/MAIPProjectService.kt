@@ -39,7 +39,7 @@ class MAIPProjectService(private val project: Project) : Disposable {
     private val log = Logger.getInstance(MAIPProjectService::class.java)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private var client: MAIPApiClient? = null
+    @Volatile private var client: MAIPApiClient? = null
 
     /** Cached agent list. Thread-safe via copy-on-write. */
     @Volatile
@@ -105,8 +105,17 @@ class MAIPProjectService(private val project: Project) : Disposable {
      * Rebuilds the API client from current settings. Call this after
      * settings are changed to pick up new credentials or endpoints.
      */
-    fun rebuildClient() {
+    @Synchronized fun rebuildClient() {
         client?.shutdown()
+        client = null
+        agents = emptyList()
+        receipts = emptyList()
+        trustScores = emptyList()
+        listeners.forEach {
+            it.onAgentsChanged(emptyList())
+            it.onReceiptsChanged(emptyList())
+            it.onTrustScoresChanged(emptyList())
+        }
         val config = MAIPConfig.fromSettings()
         if (config.isValid) {
             client = MAIPApiClient(config)
@@ -135,8 +144,11 @@ class MAIPProjectService(private val project: Project) : Disposable {
         scope.launch {
             try {
                 val result = apiClient.listAgents()
+                synchronized(this@MAIPProjectService) {
+                if (apiClient !== client) return@launch
                 agents = result
                 listeners.forEach { it.onAgentsChanged(result) }
+                }
             } catch (e: Exception) {
                 log.warn("Failed to refresh agents", e)
             }
@@ -151,8 +163,11 @@ class MAIPProjectService(private val project: Project) : Disposable {
         scope.launch {
             try {
                 val result = apiClient.listReceipts()
+                synchronized(this@MAIPProjectService) {
+                if (apiClient !== client) return@launch
                 receipts = result
                 listeners.forEach { it.onReceiptsChanged(result) }
+                }
             } catch (e: Exception) {
                 log.warn("Failed to refresh receipts", e)
             }
@@ -166,9 +181,12 @@ class MAIPProjectService(private val project: Project) : Disposable {
         val apiClient = client ?: return
         scope.launch {
             try {
-                val result = apiClient.listAgents()
+                val result = apiClient.listTrustScores()
+                synchronized(this@MAIPProjectService) {
+                if (apiClient !== client) return@launch
                 trustScores = result
                 listeners.forEach { it.onTrustScoresChanged(result) }
+                }
             } catch (e: Exception) {
                 log.warn("Failed to refresh trust scores", e)
             }

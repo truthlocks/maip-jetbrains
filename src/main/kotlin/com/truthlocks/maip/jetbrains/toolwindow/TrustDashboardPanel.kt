@@ -84,7 +84,7 @@ class TrustDashboardPanel(private val project: Project) : Disposable {
     private fun setupUI() {
         mainPanel.border = JBUI.Borders.empty(8)
 
-        kpiPanel.add(createKpiCard("Total Agents", totalAgentsLabel, MAIPIcons.AGENT))
+        kpiPanel.add(createKpiCard("Loaded Scores", totalAgentsLabel, MAIPIcons.AGENT))
         kpiPanel.add(createKpiCard("Avg Trust", avgTrustLabel, MAIPIcons.TRUST))
         kpiPanel.add(createKpiCard("High Trust", highTrustLabel, MAIPIcons.TRUST_HIGH))
         kpiPanel.add(createKpiCard("Low Trust", lowTrustLabel, MAIPIcons.TRUST_LOW))
@@ -122,6 +122,7 @@ class TrustDashboardPanel(private val project: Project) : Disposable {
 
         mainPanel.add(topPanel, BorderLayout.NORTH)
         mainPanel.add(centerPanel, BorderLayout.CENTER)
+        mainPanel.add(JBLabel("Sample: up to 100 agents. Missing score requests are excluded; not a workspace-wide assessment."), BorderLayout.SOUTH)
     }
 
     private fun updateDashboard(trustScores: List<JsonObject>) {
@@ -130,11 +131,11 @@ class TrustDashboardPanel(private val project: Project) : Disposable {
         val total = scores.size
         val avg = if (scores.isEmpty()) 0.0 else scores.average()
         val high = scores.count { it >= 0.8 }
-        val medium = scores.count { it in 0.5..0.79 }
+        val medium = scores.count { it >= 0.5 && it < 0.8 }
         val low = scores.count { it < 0.5 }
 
         totalAgentsLabel.text = total.toString()
-        avgTrustLabel.text = TrustService.formatScore(avg)
+        avgTrustLabel.text = if (scores.isEmpty()) "Not available" else TrustService.formatScore(avg)
         avgTrustLabel.foreground = TrustService.trustColor(avg)
         highTrustLabel.text = high.toString()
         highTrustLabel.foreground = TrustService.HIGH_TRUST_COLOR

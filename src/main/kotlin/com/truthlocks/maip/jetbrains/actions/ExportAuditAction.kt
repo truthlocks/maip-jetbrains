@@ -83,6 +83,7 @@ class ExportAuditAction : AnAction() {
                 return@launch
             }
 
+            try {
             val result = client.exportAudit(startDate, endDate, format)
             if (result != null) {
                 outputFile.writeText(result)
@@ -95,6 +96,9 @@ class ExportAuditAction : AnAction() {
                 }
             } else {
                 MAIPNotifier.error(project, "MAIP", "Failed to export audit report.")
+            }
+            } catch (e: Exception) {
+                MAIPNotifier.error(project, "Audit Export", e.message ?: "Export failed; no completed report was saved.")
             }
         }
     }

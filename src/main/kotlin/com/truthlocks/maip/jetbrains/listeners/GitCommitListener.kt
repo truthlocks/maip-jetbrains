@@ -26,7 +26,11 @@ import com.truthlocks.maip.jetbrains.settings.MAIPSettingsState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.security.MessageDigest
+import git4idea.repo.GitRepositoryManager
+import git4idea.commands.Git
+import git4idea.commands.GitCommand
+import git4idea.commands.GitLineHandler
+import java.nio.file.Path
 
 /**
  * VCS checkin handler factory that creates auto-receipt handlers for Git commits.
@@ -36,7 +40,7 @@ import java.security.MessageDigest
  * descriptor).
  *
  * When auto-receipt on commit is enabled, the handler fires after a successful
- * commit, hashing the changed files and creating a receipt via the MAIP API.
+ * commit, reading the actual Git commit object and creating a receipt via the MAIP API.
  */
 class GitCommitListener : CheckinHandlerFactory() {
 
@@ -57,41 +61,39 @@ class GitCommitListener : CheckinHandlerFactory() {
 
                 if (changedFiles.isEmpty()) return
 
-                val compositeHash = computeCompositeHash(changedFiles)
-                val author = settings.agentId.ifBlank { "unknown" }
-
                 log.info("Creating auto-receipt for commit with ${changedFiles.size} files")
 
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
                         val receiptService = ReceiptService.getInstance(project)
-                        receiptService.createReceiptForCommit(
-                            commitHash = compositeHash,
-                            message = commitMessage,
-                            author = author,
-                            changedFiles = changedFiles
-                        )
+                        for (repository in GitRepositoryManager.getInstance(project).repositories) {
+                            val root = Path.of(repository.root.path).normalize()
+                            val relativeFiles = changedFiles.map { Path.of(it).normalize() }
+                                .filter { it.startsWith(root) }
+                                .map { root.relativize(it).toString().replace('\\', '/') }
+                            if (relativeFiles.isEmpty()) continue
+                            val command = GitLineHandler(project, repository.root, GitCommand.LOG)
+                            command.addParameters("-1", "--format=%H%x00%an", "HEAD")
+                            val result = Git.getInstance().runCommand(command)
+                            if (!result.success()) throw IllegalStateException("Cannot read completed Git commit")
+                            val fields = result.output.joinToString("\n").split('\u0000', limit = 2)
+                            val hash = fields.firstOrNull()?.trim().orEmpty()
+                            if (!hash.matches(Regex("[0-9a-f]{40}|[0-9a-f]{64}"))) {
+                                throw IllegalStateException("Git returned an invalid commit identifier")
+                            }
+                            receiptService.createReceiptForCommit(
+                                commitHash = hash,
+                                message = commitMessage,
+                                author = fields.getOrElse(1) { "" }.trim(),
+                                changedFiles = relativeFiles
+                            )
+                        }
                     } catch (e: Exception) {
                         log.warn("Failed to create auto-receipt for commit", e)
                     }
                 }
             }
 
-            /**
-             * Computes a SHA-256 hash of all changed file paths concatenated together.
-             * This serves as a deterministic identifier for the changeset when the
-             * actual VCS commit hash is not yet available in the checkin handler.
-             *
-             * @param filePaths The list of changed file paths.
-             * @return The hex-encoded SHA-256 hash.
-             */
-            private fun computeCompositeHash(filePaths: List<String>): String {
-                val digest = MessageDigest.getInstance("SHA-256")
-                filePaths.sorted().forEach { path ->
-                    digest.update(path.toByteArray(Charsets.UTF_8))
-                }
-                return digest.digest().joinToString("") { "%02x".format(it) }
-            }
         }
     }
 }

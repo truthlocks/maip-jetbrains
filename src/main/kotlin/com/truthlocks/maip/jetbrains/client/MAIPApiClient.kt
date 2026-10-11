@@ -18,9 +18,11 @@ package com.truthlocks.maip.jetbrains.client
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import com.intellij.openapi.diagnostic.Logger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -29,6 +31,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 /**
@@ -45,22 +51,26 @@ class MAIPApiClient(private val config: MAIPConfig) {
 
     private val log = Logger.getInstance(MAIPApiClient::class.java)
     private val gson = Gson()
+    private val baseUrl = config.apiUrl.trimEnd('/').replace("/maip/v1", "/v1")
+    private fun encoded(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20")
     private val jsonMediaType = "application/json".toMediaType()
 
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .retryOnConnectionFailure(false)
         .connectTimeout(config.timeoutMs, TimeUnit.MILLISECONDS)
         .readTimeout(config.timeoutMs, TimeUnit.MILLISECONDS)
         .writeTimeout(config.timeoutMs, TimeUnit.MILLISECONDS)
         .addInterceptor { chain ->
             val original = chain.request()
-            val builder = original.newBuilder()
+            val augmented = original.newBuilder()
                 .header("X-API-Key", config.apiKey)
+
                 .header("Accept", "application/json")
-                .header("User-Agent", "MAIP-JetBrains/1.0.0")
-            if (config.tenantId.isNotBlank() && !config.apiKey.startsWith("tl_live_")) {
-                builder.header("X-Tenant-ID", config.tenantId)
-            }
-            chain.proceed(builder.build())
+                .header("User-Agent", "MAIP-JetBrains/1.1.0")
+                .build()
+            chain.proceed(augmented)
         }
         .build()
 
@@ -78,17 +88,16 @@ class MAIPApiClient(private val config: MAIPConfig) {
      */
     suspend fun registerAgent(
         name: String,
-        agentType: String = "tool",
-        scopes: List<String> = emptyList(),
+        capabilities: List<String>,
         parentId: String? = null
     ): JsonObject? {
         val body = JsonObject().apply {
             addProperty("display_name", name)
-            addProperty("agent_type", agentType)
-            add("scopes", gson.toJsonTree(scopes))
+            addProperty("agent_type", "service")
+            add("scopes", gson.toJsonTree(capabilities))
             if (parentId != null) addProperty("parent_agent_id", parentId)
         }
-        return post("/agents", body)
+        return post("/agents", body)?.let { agentView(it) }
     }
 
     /**
@@ -100,7 +109,7 @@ class MAIPApiClient(private val config: MAIPConfig) {
      */
     suspend fun listAgents(limit: Int = 50, offset: Int = 0): List<JsonObject> {
         val result = get("/agents?limit=$limit&offset=$offset")
-        return parseList(result)
+        return parseList(result).map { agentView(it) }
     }
 
     /**
@@ -110,7 +119,7 @@ class MAIPApiClient(private val config: MAIPConfig) {
      * @return The agent JSON object, or `null` if not found.
      */
     suspend fun getAgent(agentId: String): JsonObject? {
-        return get("/agents/${URLEncoder.encode(agentId, "UTF-8")}")
+        return get("/agents/${encoded(agentId)}")?.let { agentView(it) }
     }
 
     /**
@@ -122,9 +131,10 @@ class MAIPApiClient(private val config: MAIPConfig) {
      */
     suspend fun suspendAgent(agentId: String, reason: String): JsonObject? {
         val body = JsonObject().apply {
+            addProperty("status", "suspended")
             addProperty("reason", reason)
         }
-        return post("/agents/${URLEncoder.encode(agentId, "UTF-8")}/suspend", body)
+        return post("/agents/${encoded(agentId)}/suspend", body)
     }
 
     /**
@@ -136,9 +146,10 @@ class MAIPApiClient(private val config: MAIPConfig) {
      */
     suspend fun revokeAgent(agentId: String, reason: String): JsonObject? {
         val body = JsonObject().apply {
+            addProperty("status", "revoked")
             addProperty("reason", reason)
         }
-        return post("/agents/${URLEncoder.encode(agentId, "UTF-8")}/revoke", body)
+        return post("/agents/${encoded(agentId)}/revoke", body)
     }
 
     // -------------------------------------------------------------------------
@@ -157,17 +168,19 @@ class MAIPApiClient(private val config: MAIPConfig) {
      */
     suspend fun createReceipt(
         receiptType: String,
-        action: String,
+        description: String,
+        artifactHash: String,
         agentId: String,
-        payload: Map<String, Any> = emptyMap()
+        metadata: Map<String, String> = emptyMap()
     ): JsonObject? {
         val body = JsonObject().apply {
-            addProperty("receipt_type", receiptType)
-            addProperty("action", action)
+            addProperty("receipt_type", "action")
+            addProperty("action", description)
             addProperty("agent_id", agentId)
-            add("payload", gson.toJsonTree(payload))
+            val receiptMetadata = metadata + mapOf("kind" to receiptType)
+            add("metadata", gson.toJsonTree(if (artifactHash.isBlank()) receiptMetadata else receiptMetadata + mapOf("artifact_hash" to artifactHash)))
         }
-        return post("/agent-receipts", body)
+        return post("/agent-receipts", body)?.let { receiptView(it) }
     }
 
     /**
@@ -180,16 +193,18 @@ class MAIPApiClient(private val config: MAIPConfig) {
      * @return A list of receipt JSON objects.
      */
     suspend fun listReceipts(
-        receiptType: String? = null,
+        type: String? = null,
         agentId: String? = null,
         limit: Int = 50,
         offset: Int = 0
     ): List<JsonObject> {
         val params = mutableListOf("limit=$limit", "offset=$offset")
-        if (receiptType != null) params.add("receipt_type=$receiptType")
-        if (agentId != null) params.add("agent_id=${URLEncoder.encode(agentId, "UTF-8")}")
+        if (type != null) params.add("q=${encoded(type)}")
+        if (agentId != null) params.add("agent_id=${encoded(agentId)}")
         val result = get("/agent-receipts/filter?${params.joinToString("&")}")
-        return parseList(result)
+        return parseList(result).map { receiptView(it) }.filter {
+            type == null || it.get("type")?.takeUnless { value -> value.isJsonNull }?.asString == type
+        }
     }
 
     /**
@@ -199,7 +214,7 @@ class MAIPApiClient(private val config: MAIPConfig) {
      * @return The receipt JSON object, or `null` if not found.
      */
     suspend fun getReceipt(receiptId: String): JsonObject? {
-        return get("/agent-receipts/${URLEncoder.encode(receiptId, "UTF-8")}")
+        return get("/agent-receipts/${encoded(receiptId)}")?.let { receiptView(it) }
     }
 
     /**
@@ -209,17 +224,10 @@ class MAIPApiClient(private val config: MAIPConfig) {
      * @return The verification result JSON object, or `null` on failure.
      */
     suspend fun verifyReceipt(receiptId: String): JsonObject? {
-        val receipt = getReceipt(receiptId) ?: return null
-        val status = receipt.get("status")?.asString ?: "unknown"
-        val valid = status == "valid"
-        return JsonObject().apply {
-            addProperty("valid", valid)
-            addProperty("verdict", if (valid) "PASS" else "FAIL")
-            addProperty("status", status)
-            addProperty("details", if (valid) "Receipt signature and chain verified successfully" else "Receipt status is $status")
-            if (status == "expired") addProperty("warning", "Receipt has expired")
-            if (status == "superseded") addProperty("warning", "Receipt has been superseded by a newer receipt")
-        }
+        val result = get("/agent-receipts/verify/${encoded(receiptId)}") ?: return null
+        val valid = result.get("valid")?.asBoolean == true && result.get("signature_verified")?.asBoolean == true && result.get("verdict")?.asString == "VALID"
+        result.addProperty("valid", valid)
+        return result
     }
 
     // -------------------------------------------------------------------------
@@ -233,19 +241,21 @@ class MAIPApiClient(private val config: MAIPConfig) {
      * @return The trust score JSON object, or `null` on failure.
      */
     suspend fun getTrustScore(agentId: String): JsonObject? {
-        return get("/agents/${URLEncoder.encode(agentId, "UTF-8")}/trust-score")
+        return get("/agents/${encoded(agentId)}/trust-score")?.apply {
+            get("trust_score")?.let { add("score", it) }
+            get("trust_level")?.let { add("level", it) }
+        }
     }
 
     /**
-     * Retrieves trust history for an agent.
+     * Retrieves trust scores for all agents.
      *
-     * @param agentId The agent identifier.
-     * @param limit   Maximum number of entries.
-     * @return A list of trust history JSON objects.
+     * @return A list of trust score JSON objects.
      */
-    suspend fun getTrustHistory(agentId: String, limit: Int = 50): List<JsonObject> {
-        val result = get("/agents/${URLEncoder.encode(agentId, "UTF-8")}/trust-history?limit=$limit")
-        return parseList(result)
+    suspend fun listTrustScores(): List<JsonObject> {
+        return listAgents(limit = 100).mapNotNull { agent ->
+            agent.get("agent_id")?.asString?.let { getTrustScore(it) }
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -258,8 +268,13 @@ class MAIPApiClient(private val config: MAIPConfig) {
      * @param receiptId The receipt identifier.
      * @return The delegation chain JSON object, or `null` on failure.
      */
-    suspend fun getDelegationTree(agentId: String): JsonObject? {
-        return get("/agents/${URLEncoder.encode(agentId, "UTF-8")}/delegation-tree")
+    suspend fun getDelegationChain(receiptId: String): JsonObject? {
+        val receipt = getReceipt(receiptId) ?: return null
+        val agent = receipt.get("agent_id")?.asString ?: return null
+        return get("/agents/${encoded(agent)}/delegation-tree")?.apply {
+            addProperty("signature_verified", false)
+            addProperty("note", "Delegation relationships are informational; this response does not verify delegation signatures.")
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -279,11 +294,39 @@ class MAIPApiClient(private val config: MAIPConfig) {
         endDate: String,
         format: String = "json"
     ): String? = withContext(Dispatchers.IO) {
-        val url = "${config.apiUrl}/compliance/reports?start=$startDate&end=$endDate&format=$format"
-        val request = Request.Builder().url(url).get().build()
-        executeWithRetry(request)?.use { response ->
-            if (response.isSuccessful) response.body?.string() else null
+        require(format in listOf("json", "csv")) { "Choose json or csv" }
+        val from = LocalDate.parse(startDate)
+        val through = LocalDate.parse(endDate)
+        require(!through.isBefore(from) && through.toEpochDay() - from.toEpochDay() < 366) {
+            "Choose an ordered date range of up to 366 days"
         }
+        var job = post("/audit/exports", JsonObject().apply {
+            addProperty("format", format.uppercase())
+            addProperty("from_ts", from.atStartOfDay().toInstant(ZoneOffset.UTC).toString())
+            addProperty("to_ts", through.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC).toString())
+        }) ?: return@withContext null
+        val id = job.get("id")?.asString ?: return@withContext null
+        repeat(60) {
+            when (job.get("status")?.asString) {
+                "COMPLETED" -> {
+                    val request = Request.Builder().url("$baseUrl/audit/exports/${encoded(id)}/download").get().build()
+                    return@withContext executeWithRetry(request)?.use { response ->
+                        if (!response.isSuccessful) return@use null
+                        val bytes = response.body?.bytes() ?: return@use null
+                        val expected = job.get("sha256")?.takeUnless { it.isJsonNull }?.asString
+                        val digest = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+                        if (expected != null && !digest.equals(expected, ignoreCase = true)) {
+                            throw IOException("Audit export checksum mismatch")
+                        }
+                        bytes.toString(Charsets.UTF_8)
+                    }
+                }
+                "FAILED", "EXPIRED" -> throw IOException("Audit export $id did not complete successfully")
+            }
+            delay(1000)
+            job = get("/audit/exports/${encoded(id)}") ?: return@withContext null
+        }
+        throw IOException("Export $id is still processing. Download it from Console > Audit exports when ready.")
     }
 
     // -------------------------------------------------------------------------
@@ -295,7 +338,7 @@ class MAIPApiClient(private val config: MAIPConfig) {
      */
     private suspend fun get(path: String): JsonObject? = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url("${config.apiUrl}$path")
+            .url("${baseUrl}$path")
             .get()
             .build()
         executeAndParse(request)
@@ -307,12 +350,23 @@ class MAIPApiClient(private val config: MAIPConfig) {
     private suspend fun post(path: String, body: JsonObject): JsonObject? =
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
-                .url("${config.apiUrl}$path")
+                .url("${baseUrl}$path")
                 .post(gson.toJson(body).toRequestBody(jsonMediaType))
                 .build()
             executeAndParse(request)
         }
 
+    /**
+     * Sends an HTTP PATCH request with a JSON body and parses the response.
+     */
+    private suspend fun patch(path: String, body: JsonObject): JsonObject? =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url("${baseUrl}$path")
+                .patch(gson.toJson(body).toRequestBody(jsonMediaType))
+                .build()
+            executeAndParse(request)
+        }
 
     /**
      * Executes a request with retry and parses the response body as a [JsonObject].
@@ -325,7 +379,12 @@ class MAIPApiClient(private val config: MAIPConfig) {
             }
             val bodyStr = response.body?.string() ?: return@use null
             try {
-                gson.fromJson(bodyStr, JsonObject::class.java)
+                val parsed = JsonParser.parseString(bodyStr)
+                when {
+                    parsed.isJsonObject -> parsed.asJsonObject
+                    parsed.isJsonArray -> JsonObject().apply { add("data", parsed) }
+                    else -> null
+                }
             } catch (e: Exception) {
                 log.warn("Failed to parse MAIP API response", e)
                 null
@@ -347,12 +406,13 @@ class MAIPApiClient(private val config: MAIPConfig) {
         var lastException: IOException? = null
         var backoffMs = 1_000L
 
-        for (attempt in 0..config.maxRetries) {
+        val retries = if (request.method == "GET") config.maxRetries.coerceIn(0, 3) else 0
+        for (attempt in 0..retries) {
             try {
                 val response = httpClient.newCall(request).execute()
                 val code = response.code
 
-                if (code != 429 && code < 500) {
+                if ((code != 429 && code < 500) || attempt == retries) {
                     return response
                 }
 
@@ -367,7 +427,7 @@ class MAIPApiClient(private val config: MAIPConfig) {
                 )
             }
 
-            if (attempt < config.maxRetries) {
+            if (attempt < retries) {
                 Thread.sleep(backoffMs)
                 backoffMs = (backoffMs * 2).coerceAtMost(16_000L)
             }
@@ -381,14 +441,24 @@ class MAIPApiClient(private val config: MAIPConfig) {
      * Parses a JSON response that may contain a list under a `data` key,
      * or may itself be a JSON array.
      */
+    private fun agentView(agent: JsonObject): JsonObject {
+        agent.get("agent_id")?.let { agent.add("internal_id", agent.get("id")); agent.add("id", it) }
+        agent.get("display_name")?.let { agent.add("name", it) }
+        return agent
+    }
+
+    private fun receiptView(receipt: JsonObject): JsonObject {
+        receipt.get("receipt_id")?.let { receipt.add("internal_id", receipt.get("id")); receipt.add("id", it) }
+        val metadata = receipt.get("metadata")?.takeIf { it.isJsonObject }?.asJsonObject
+        receipt.add("type", metadata?.get("kind") ?: receipt.get("receipt_type"))
+        receipt.add("description", receipt.get("action"))
+        metadata?.get("artifact_hash")?.let { receipt.add("artifact_hash", it) }
+        return receipt
+    }
+
     private fun parseList(result: JsonObject?): List<JsonObject> {
         if (result == null) return emptyList()
-        val dataElement = result.get("agents")
-            ?: result.get("receipts")
-            ?: result.get("delegations")
-            ?: result.get("data")
-            ?: result.get("items")
-            ?: return listOf(result)
+        val dataElement = result.get("data") ?: result.get("agents") ?: result.get("receipts") ?: result.get("items") ?: return listOf(result)
         if (!dataElement.isJsonArray) return emptyList()
         val type = object : TypeToken<List<JsonObject>>() {}.type
         return gson.fromJson(dataElement, type) ?: emptyList()
@@ -398,6 +468,7 @@ class MAIPApiClient(private val config: MAIPConfig) {
      * Closes the underlying HTTP client and releases connections.
      */
     fun shutdown() {
+        httpClient.dispatcher.cancelAll()
         httpClient.dispatcher.executorService.shutdown()
         httpClient.connectionPool.evictAll()
     }

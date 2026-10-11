@@ -76,12 +76,12 @@ class MAIPApiClientTest {
         assertEquals("POST", request.method)
         assertEquals("/agents", request.path)
         assertEquals("test-api-key-12345", request.getHeader("X-API-Key"))
-        assertEquals("test-tenant-001", request.getHeader("X-Tenant-ID"))
+        assertNull(request.getHeader("X-Tenant-ID"))
         assertEquals("application/json", request.getHeader("Accept"))
         assertTrue(request.getHeader("User-Agent")!!.contains("MAIP-JetBrains"))
 
         val body = gson.fromJson(request.body.readUtf8(), JsonObject::class.java)
-        assertEquals("test-coder", body.get("name").asString)
+        assertEquals("test-coder", body.get("display_name").asString)
     }
 
     @Test
@@ -89,7 +89,7 @@ class MAIPApiClientTest {
         val agent1 = JsonObject().apply { addProperty("id", "a1"); addProperty("name", "agent-1") }
         val agent2 = JsonObject().apply { addProperty("id", "a2"); addProperty("name", "agent-2") }
         val responseBody = JsonObject().apply {
-            add("data", gson.toJsonTree(listOf(agent1, agent2)))
+            add("agents", gson.toJsonTree(listOf(agent1, agent2)))
         }
         server.enqueue(MockResponse().setBody(gson.toJson(responseBody)).setResponseCode(200))
 
@@ -127,16 +127,19 @@ class MAIPApiClientTest {
         val request = server.takeRequest()
         assertEquals("POST", request.method)
         val body = gson.fromJson(request.body.readUtf8(), JsonObject::class.java)
-        assertEquals("code", body.get("type").asString)
-        assertEquals("Test receipt", body.get("description").asString)
-        assertEquals("abc123def456", body.get("artifact_hash").asString)
+        assertEquals("action", body.get("receipt_type").asString)
+        assertEquals("code", body.getAsJsonObject("metadata").get("kind").asString)
+        assertEquals("Test receipt", body.get("action").asString)
+        assertEquals("abc123def456", body.getAsJsonObject("metadata").get("artifact_hash").asString)
         assertNotNull(body.get("metadata"))
     }
 
     @Test
-    fun `verifyReceipt sends POST to correct endpoint`() = runTest {
+    fun `verifyReceipt uses signature verification GET endpoint`() = runTest {
         val responseBody = JsonObject().apply {
             addProperty("valid", true)
+            addProperty("signature_verified", true)
+            addProperty("verdict", "VALID")
             addProperty("receipt_id", "receipt-123")
         }
         server.enqueue(MockResponse().setBody(gson.toJson(responseBody)).setResponseCode(200))
@@ -147,8 +150,8 @@ class MAIPApiClientTest {
         assertTrue(result!!.get("valid").asBoolean)
 
         val request = server.takeRequest()
-        assertEquals("POST", request.method)
-        assertEquals("/receipts/receipt-123/verify", request.path)
+        assertEquals("GET", request.method)
+        assertEquals("/agent-receipts/verify/receipt-123", request.path)
     }
 
     @Test
@@ -226,7 +229,7 @@ class MAIPApiClientTest {
     }
 
     @Test
-    fun `suspendAgent sends PATCH with correct body`() = runTest {
+    fun `suspendAgent posts to lifecycle action with correct body`() = runTest {
         val responseBody = JsonObject().apply {
             addProperty("id", "agent-1")
             addProperty("status", "suspended")
@@ -239,15 +242,18 @@ class MAIPApiClientTest {
         assertEquals("suspended", result?.get("status")?.asString)
 
         val request = server.takeRequest()
-        assertEquals("PATCH", request.method)
+        assertEquals("POST", request.method)
+        assertEquals("/agents/agent-1/suspend", request.path)
         val body = gson.fromJson(request.body.readUtf8(), JsonObject::class.java)
         assertEquals("suspended", body.get("status").asString)
         assertEquals("policy violation", body.get("reason").asString)
     }
 
     @Test
-    fun `exportAudit returns raw response body`() = runTest {
+    fun `exportAudit creates polls and downloads native export`() = runTest {
         val csvContent = "id,type,timestamp\nreceipt-1,code,2026-01-01"
+        server.enqueue(MockResponse().setBody("""{"id":"job-1","status":"PENDING"}"""))
+        server.enqueue(MockResponse().setBody("""{"id":"job-1","status":"COMPLETED"}"""))
         server.enqueue(MockResponse().setBody(csvContent).setResponseCode(200))
 
         val result = client.exportAudit("2026-01-01", "2026-01-31", "csv")
@@ -256,9 +262,14 @@ class MAIPApiClientTest {
         assertTrue(result!!.contains("receipt-1"))
 
         val request = server.takeRequest()
-        assertTrue(request.path!!.contains("start=2026-01-01"))
-        assertTrue(request.path!!.contains("end=2026-01-31"))
-        assertTrue(request.path!!.contains("format=csv"))
+        assertEquals("/audit/exports", request.path)
+        assertEquals("POST", request.method)
+        val body = gson.fromJson(request.body.readUtf8(), JsonObject::class.java)
+        assertEquals("2026-01-01T00:00:00Z", body.get("from_ts").asString)
+        assertEquals("2026-02-01T00:00:00Z", body.get("to_ts").asString)
+        assertEquals("CSV", body.get("format").asString)
+        assertEquals("/audit/exports/job-1", server.takeRequest().path)
+        assertEquals("/audit/exports/job-1/download", server.takeRequest().path)
     }
 
     @Test
@@ -278,6 +289,52 @@ class MAIPApiClientTest {
         assertFalse(noKey.isValid)
 
         val noTenant = valid.copy(tenantId = "")
-        assertFalse(noTenant.isValid)
+        assertTrue(noTenant.isValid)
     }
+    @Test
+    fun `write failure is never automatically replayed`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(503))
+        server.enqueue(MockResponse().setResponseCode(201).setBody("{}"))
+        assertNull(client.createReceipt("code", "qa", "abc", "maip:qa:agent"))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `status without signature verification is not valid`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"valid":true,"verdict":"VALID","status":"active"}"""))
+        assertFalse(client.verifyReceipt("maip-receipt:qa")!!.get("valid").asBoolean)
+    }
+
+    @Test
+    fun `credentialed requests never follow redirects`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", server.url("/other")))
+        server.enqueue(MockResponse().setBody("{}"))
+        assertNull(client.getAgent("maip:qa:agent"))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `export refuses corrupted artifact`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"id":"job-1","status":"COMPLETED","sha256":"wrong"}"""))
+        server.enqueue(MockResponse().setBody("[]"))
+        var failed = false
+        try { client.exportAudit("2026-01-01", "2026-01-31") } catch (e: java.io.IOException) { failed = true }
+        assertTrue(failed)
+    }
+
+    @Test
+    fun `native array agent list is accepted`() = runTest {
+        server.enqueue(MockResponse().setBody("""[{"agent_id":"maip:qa:one"}]"""))
+        assertEquals("maip:qa:one", client.listAgents().single().get("agent_id").asString)
+    }
+
+    @Test
+    fun `build event does not claim a timestamp hash is an artifact digest`() = runTest {
+        server.enqueue(MockResponse().setBody("{}"))
+        client.createReceipt("build", "build complete", "", "maip:qa:one", mapOf("build_id" to "qa-build"))
+        val metadata = gson.fromJson(server.takeRequest().body.readUtf8(), JsonObject::class.java).getAsJsonObject("metadata")
+        assertFalse(metadata.has("artifact_hash"))
+        assertEquals("qa-build", metadata.get("build_id").asString)
+    }
+
 }

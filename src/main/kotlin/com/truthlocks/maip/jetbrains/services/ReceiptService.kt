@@ -66,23 +66,27 @@ class ReceiptService(private val project: Project) {
         try {
             val content = file.contentsToByteArray()
             val hash = sha256Hex(content)
-            val desc = description ?: "Receipt for ${file.path}"
+            val base = project.basePath?.let { java.nio.file.Path.of(it).normalize() }
+            val path = java.nio.file.Path.of(file.path).normalize()
+            val displayPath = if (base != null && path.startsWith(base)) base.relativize(path).toString() else file.name
+            val desc = description ?: "Receipt for $displayPath"
 
             val receipt = client.createReceipt(
-                receiptType = "action",
-                action = desc,
+                receiptType = "code",
+                description = desc,
+                artifactHash = hash,
                 agentId = config.agentId,
-                payload = mapOf(
-                    "file_path" to file.path,
+                metadata = mapOf(
+                    "file_path" to displayPath,
                     "file_name" to file.name,
                     "file_size" to content.size.toString(),
-                    "content_type" to file.fileType.name,
-                    "artifact_hash" to hash
+                    "content_type" to (file.fileType.name),
+                    "requested_algorithm" to config.signingAlgorithm
                 )
             )
 
             if (receipt != null) {
-                val receiptId = receipt.get("receipt_id")?.asString ?: receipt.get("id")?.asString ?: "unknown"
+                val receiptId = receipt.get("id")?.asString ?: "unknown"
                 MAIPNotifier.info(project, "MAIP Receipt Created", "Receipt ID: $receiptId")
                 MAIPProjectService.getInstance(project).refreshReceipts()
             } else {
@@ -118,20 +122,22 @@ class ReceiptService(private val project: Project) {
 
         try {
             val receipt = client.createReceipt(
-                receiptType = "action",
-                action = "git_commit: ${message.take(100)}",
+                receiptType = "commit",
+                description = "Commit: ${message.take(100)}",
+                artifactHash = commitHash,
                 agentId = config.agentId,
-                payload = mapOf(
+                metadata = mapOf(
                     "commit_hash" to commitHash,
                     "commit_message" to message,
                     "author" to author,
                     "changed_files" to changedFiles.joinToString(","),
-                    "changed_file_count" to changedFiles.size.toString()
+                    "changed_file_count" to changedFiles.size.toString(),
+                    "requested_algorithm" to config.signingAlgorithm
                 )
             )
 
             if (receipt != null) {
-                val receiptId = receipt.get("receipt_id")?.asString ?: receipt.get("id")?.asString ?: "unknown"
+                val receiptId = receipt.get("id")?.asString ?: "unknown"
                 MAIPNotifier.info(
                     project,
                     "MAIP Commit Receipt",
@@ -167,7 +173,8 @@ class ReceiptService(private val project: Project) {
                 if (valid) {
                     MAIPNotifier.info(project, "MAIP Verification", "Receipt $receiptId is VALID")
                 } else {
-                    MAIPNotifier.warn(project, "MAIP Verification", "Receipt $receiptId is INVALID")
+                    val verdict = result.get("verdict")?.takeUnless { it.isJsonNull }?.asString ?: "UNVERIFIED"
+                    MAIPNotifier.warn(project, "MAIP Verification", "Receipt $receiptId: $verdict (not cryptographically verified)")
                 }
             } else {
                 MAIPNotifier.error(project, "MAIP", "Verification failed for receipt $receiptId")
@@ -186,12 +193,12 @@ class ReceiptService(private val project: Project) {
      * @param receiptId The receipt ID.
      * @return The delegation chain JSON object, or `null` on failure.
      */
-    suspend fun getDelegationTree(agentId: String): JsonObject? = withContext(Dispatchers.IO) {
+    suspend fun getDelegationChain(receiptId: String): JsonObject? = withContext(Dispatchers.IO) {
         val client = MAIPProjectService.getInstance(project).getClient() ?: return@withContext null
         try {
-            client.getDelegationTree(agentId)
+            client.getDelegationChain(receiptId)
         } catch (e: Exception) {
-            log.warn("Failed to get delegation tree for $agentId", e)
+            log.warn("Failed to get delegation chain for $receiptId", e)
             null
         }
     }

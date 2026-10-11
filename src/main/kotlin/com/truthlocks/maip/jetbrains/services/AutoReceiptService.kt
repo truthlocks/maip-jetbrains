@@ -36,20 +36,18 @@ class AutoReceiptService(private val project: Project) : Disposable {
 
     private val log = Logger.getInstance(AutoReceiptService::class.java)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var initialized = false
 
     /**
      * Initializes the auto-receipt service by registering event listeners.
      */
     fun initialize() {
+        if (initialized) return
+        initialized = true
         val settings = MAIPSettingsState.getInstance()
-        if (!settings.isConfigured()) {
-            log.info("MAIP not configured, auto-receipt service idle")
-            return
-        }
-
-        if (settings.autoReceiptOnSave) {
-            registerFileSaveListener()
-        }
+        registerFileSaveListener()
+        project.messageBus.connect(this).subscribe(com.intellij.task.ProjectTaskListener.TOPIC,
+            com.truthlocks.maip.jetbrains.listeners.BuildListener(project))
 
         log.info("Auto-receipt service initialized (save=${settings.autoReceiptOnSave}, build=${settings.autoReceiptOnBuild})")
     }
@@ -62,9 +60,11 @@ class AutoReceiptService(private val project: Project) : Disposable {
             FileDocumentManagerListener.TOPIC,
             object : FileDocumentManagerListener {
                 override fun beforeDocumentSaving(document: com.intellij.openapi.editor.Document) {
+                    val settings = MAIPSettingsState.getInstance()
+                    if (!settings.autoReceiptOnSave || !settings.isConfigured()) return
                     val file = FileDocumentManager.getInstance().getFile(document) ?: return
                     if (shouldAutoReceipt(file)) {
-                        createAutoReceipt(file, "save")
+                        createAutoReceipt(file, document.text.toByteArray(Charsets.UTF_8))
                     }
                 }
             }
@@ -85,7 +85,7 @@ class AutoReceiptService(private val project: Project) : Disposable {
         if (file.length > MAX_AUTO_RECEIPT_SIZE) return false
 
         val projectBasePath = project.basePath ?: return false
-        return file.path.startsWith(projectBasePath)
+        return java.nio.file.Path.of(file.path).normalize().startsWith(java.nio.file.Path.of(projectBasePath).normalize())
     }
 
     /**
@@ -94,14 +94,16 @@ class AutoReceiptService(private val project: Project) : Disposable {
      * @param file   The file to receipt.
      * @param trigger The trigger source (e.g. "save", "build").
      */
-    private fun createAutoReceipt(file: VirtualFile, trigger: String) {
+    private fun createAutoReceipt(file: VirtualFile, snapshot: ByteArray) {
         scope.launch {
             try {
-                val receiptService = ReceiptService.getInstance(project)
-                receiptService.createReceiptForFile(
-                    file = file,
-                    description = "Auto-receipt ($trigger): ${file.name}"
-                )
+                val client = MAIPProjectService.getInstance(project).getClient() ?: return@launch
+                val config = com.truthlocks.maip.jetbrains.client.MAIPConfig.fromSettings()
+                if (config.agentId.isBlank()) return@launch
+                val hash = java.security.MessageDigest.getInstance("SHA-256").digest(snapshot).joinToString("") { "%02x".format(it) }
+                client.createReceipt("code", "Editor snapshot before save: ${file.name}", hash, config.agentId,
+                    mapOf("content_basis" to "editor_text_utf8", "file_name" to file.name, "trigger" to "before_save"))
+                MAIPProjectService.getInstance(project).refreshReceipts()
             } catch (e: Exception) {
                 log.warn("Auto-receipt failed for ${file.path}: ${e.message}")
             }
@@ -125,12 +127,13 @@ class AutoReceiptService(private val project: Project) : Disposable {
                 if (config.agentId.isBlank()) return@launch
 
                 client.createReceipt(
-                    receiptType = "action",
-                    action = "build: $buildId",
+                    receiptType = "build",
+                    description = "Build receipt: $buildId",
+                    artifactHash = "",
                     agentId = config.agentId,
-                    payload = mapOf(
-                        "artifact_path" to artifactPath,
+                    metadata = mapOf(
                         "build_id" to buildId,
+                        "artifact_digest_status" to "not_collected",
                         "trigger" to "build"
                     )
                 )

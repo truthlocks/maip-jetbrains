@@ -42,10 +42,11 @@ class MAIPSettingsState : PersistentStateComponent<MAIPSettingsState.State> {
      * Serializable state holder. Only non-secret fields are persisted here.
      */
     data class State(
-        var apiUrl: String = "https://api.truthlocks.com/v1",
+        var apiUrl: String = "https://sandbox-api.truthlocks.com/v1",
         var tenantId: String = "",
         var agentId: String = "",
-        var autoReceiptOnCommit: Boolean = true,
+        var signingAlgorithm: String = "Ed25519",
+        var autoReceiptOnCommit: Boolean = false,
         var autoReceiptOnSave: Boolean = false,
         var autoReceiptOnBuild: Boolean = false,
         var timeoutMs: Long = 30_000L,
@@ -68,6 +69,11 @@ class MAIPSettingsState : PersistentStateComponent<MAIPSettingsState.State> {
     var agentId: String
         get() = internalState.agentId
         set(value) { internalState.agentId = value }
+
+    /** Signing algorithm for receipts (one of SUPPORTED_ALGORITHMS). */
+    var signingAlgorithm: String
+        get() = internalState.signingAlgorithm
+        set(value) { internalState.signingAlgorithm = value }
 
     /** Whether to auto-generate receipts on VCS commits. */
     var autoReceiptOnCommit: Boolean
@@ -125,7 +131,7 @@ class MAIPSettingsState : PersistentStateComponent<MAIPSettingsState.State> {
      * Returns `true` if the minimum required configuration is present.
      */
     fun isConfigured(): Boolean {
-        return apiUrl.isNotBlank() && getApiKey().isNotBlank() && tenantId.isNotBlank()
+        return apiUrl.isNotBlank() && getApiKey().isNotBlank()
     }
 
     private fun createCredentialAttributes(): CredentialAttributes {
@@ -135,6 +141,14 @@ class MAIPSettingsState : PersistentStateComponent<MAIPSettingsState.State> {
     }
 
     companion object {
+        /** Requested algorithm metadata values; actual signing follows the registered agent key (JOSE/JWA standard names). */
+        val SUPPORTED_ALGORITHMS = listOf(
+            "ES256", "ES384", "ES512",
+            "RS256", "RS384", "RS512",
+            "PS256", "PS384", "PS512",
+            "Ed25519"
+        )
+
         /**
          * Returns the singleton instance of [MAIPSettingsState].
          */

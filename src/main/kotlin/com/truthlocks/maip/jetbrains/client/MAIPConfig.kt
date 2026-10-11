@@ -24,7 +24,7 @@ import com.truthlocks.maip.jetbrains.settings.MAIPSettingsState
  * Constructed from the current [MAIPSettingsState] so that configuration
  * changes are picked up on the next API call without requiring a restart.
  *
- * @property apiUrl    The base URL for the MAIP API (e.g. `https://api.truthlocks.com/maip/v1`).
+ * @property apiUrl    The base URL for the MAIP API (e.g. `https://sandbox-api.truthlocks.com/v1`).
  * @property apiKey    The API key used for authentication.
  * @property tenantId  The tenant identifier for multi-tenant isolation.
  * @property agentId   The default agent ID to use when creating receipts.
@@ -36,6 +36,7 @@ data class MAIPConfig(
     val apiKey: String,
     val tenantId: String,
     val agentId: String,
+    val signingAlgorithm: String = "Ed25519",
     val timeoutMs: Long = 30_000L,
     val maxRetries: Int = 3
 ) {
@@ -44,7 +45,7 @@ data class MAIPConfig(
      * Returns `true` if the minimum required configuration fields are present.
      */
     val isValid: Boolean
-        get() = apiUrl.isNotBlank() && apiKey.isNotBlank() && tenantId.isNotBlank()
+        get() = apiUrl.isNotBlank() && apiKey.isNotBlank()
 
     companion object {
 
@@ -60,6 +61,7 @@ data class MAIPConfig(
                 apiKey = state.getApiKey(),
                 tenantId = state.tenantId,
                 agentId = state.agentId,
+                signingAlgorithm = state.signingAlgorithm,
                 timeoutMs = state.timeoutMs,
                 maxRetries = state.maxRetries
             )

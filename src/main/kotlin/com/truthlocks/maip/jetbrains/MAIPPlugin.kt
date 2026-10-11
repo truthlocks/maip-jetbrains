@@ -16,11 +16,16 @@
 
 package com.truthlocks.maip.jetbrains
 
+import com.intellij.notification.NotificationAction
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
 import com.truthlocks.maip.jetbrains.services.AutoReceiptService
 import com.truthlocks.maip.jetbrains.services.MAIPProjectService
+import com.truthlocks.maip.jetbrains.services.RegistrationService
 
 /**
  * Entry point for the MAIP plugin. Executes on project open to initialize
@@ -38,6 +43,9 @@ class MAIPPlugin : ProjectActivity {
      * and the auto-receipt service so they begin caching data and listening
      * for events.
      *
+     * Also checks for stored credentials; if none are found, shows a balloon
+     * notification prompting the user to register.
+     *
      * @param project The opened project.
      */
     override suspend fun execute(project: Project) {
@@ -49,6 +57,36 @@ class MAIPPlugin : ProjectActivity {
         val autoReceiptService = project.getService(AutoReceiptService::class.java)
         autoReceiptService.initialize()
 
+        checkCredentialsAndNotify(project)
+
         log.info("MAIP plugin initialized for project: ${project.name}")
+    }
+
+    /**
+     * Checks whether stored API credentials exist. If not, shows a balloon
+     * notification with an action to open the MAIP settings panel where
+     * the user can register.
+     */
+    private fun checkCredentialsAndNotify(project: Project) {
+        val registrationService = RegistrationService.getInstance()
+        if (registrationService.hasStoredCredentials()) {
+            return
+        }
+
+        log.info("No MAIP credentials found, prompting user to register")
+
+        val notification = NotificationGroupManager.getInstance()
+            .getNotificationGroup("MAIP Notifications")
+            .createNotification(
+                "Get started with Truthlocks",
+                "Register for a free API key to enable machine identity receipts and trust scoring.",
+                NotificationType.INFORMATION
+            )
+            .addAction(NotificationAction.createSimple("Register Now") {
+                ShowSettingsUtil.getInstance()
+                    .showSettingsDialog(project, "MAIP")
+            })
+
+        notification.notify(project)
     }
 }

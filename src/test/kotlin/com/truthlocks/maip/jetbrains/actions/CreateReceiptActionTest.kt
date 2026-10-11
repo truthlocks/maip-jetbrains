@@ -64,14 +64,14 @@ class CreateReceiptActionTest {
     }
 
     @Test
-    fun `MAIPConfig isValid returns false with blank tenant ID`() {
+    fun `MAIPConfig derives tenant from API key without tenant header`() {
         val config = MAIPConfig(
             apiUrl = "https://api.example.com",
             apiKey = "key-123",
             tenantId = "",
             agentId = "agent-xyz"
         )
-        assertFalse(config.isValid)
+        assertTrue(config.isValid)
     }
 
     @Test

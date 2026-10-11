@@ -47,7 +47,7 @@ class BuildListener(private val project: Project) : ProjectTaskListener {
         val settings = MAIPSettingsState.getInstance()
         if (!settings.autoReceiptOnBuild || !settings.isConfigured()) return
 
-        if (result.hasErrors()) {
+        if (result.hasErrors() || result.isAborted) {
             log.info("Build completed with errors, skipping auto-receipt")
             return
         }
