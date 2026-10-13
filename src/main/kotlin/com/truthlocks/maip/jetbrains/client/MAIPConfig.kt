@@ -38,14 +38,17 @@ data class MAIPConfig(
     val agentId: String,
     val signingAlgorithm: String = "Ed25519",
     val timeoutMs: Long = 30_000L,
-    val maxRetries: Int = 3
+    val maxRetries: Int = 3,
+    val bearerToken: String = ""
 ) {
 
     /**
      * Returns `true` if the minimum required configuration fields are present.
      */
     val isValid: Boolean
-        get() = apiUrl.isNotBlank() && apiKey.isNotBlank()
+        get() = apiUrl.isNotBlank() && (apiKey.isNotBlank() || bearerToken.isNotBlank())
+
+    override fun toString(): String = "MAIPConfig(apiUrl=$apiUrl, credentials=[redacted], agentId=$agentId)"
 
     companion object {
 

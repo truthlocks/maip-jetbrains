@@ -337,4 +337,20 @@ class MAIPApiClientTest {
         assertEquals("qa-build", metadata.get("build_id").asString)
     }
 
+    @Test
+    fun `bearer session takes precedence without disclosing the API key`() = runTest {
+        val config = MAIPConfig(server.url("/").toString(), "must-not-send", "", "", bearerToken = "short-session", maxRetries = 0)
+        assertTrue(config.isValid)
+        assertFalse(config.toString().contains("must-not-send"))
+        assertFalse(config.toString().contains("short-session"))
+        val sessionClient = MAIPApiClient(config)
+        try {
+            server.enqueue(MockResponse().setBody("{\"agents\":[]}"))
+            sessionClient.listAgents()
+            val request = server.takeRequest()
+            assertEquals("Bearer short-session", request.getHeader("Authorization"))
+            assertNull(request.getHeader("X-API-Key"))
+        } finally { sessionClient.shutdown() }
+    }
+
 }

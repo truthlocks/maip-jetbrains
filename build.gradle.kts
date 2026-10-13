@@ -14,56 +14,83 @@
  * limitations under the License.
  */
 
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
+import org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode
+
 plugins {
     id("java")
-    id("org.jetbrains.kotlin.jvm") version "1.9.22"
-    id("org.jetbrains.intellij") version "1.17.2"
+    id("org.jetbrains.kotlin.jvm") version "2.3.21"
+    id("org.jetbrains.intellij.platform") version "2.19.0"
 }
 
 group = "com.truthlocks.maip"
-version = "1.1.0"
+version = "1.2.0"
 
 repositories {
     mavenCentral()
+    intellijPlatform { defaultRepositories() }
 }
 
 dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.10.1")
-
+    intellijPlatform {
+        intellijIdeaCommunity("2024.1") { useInstaller = false }
+        bundledPlugin("Git4Idea")
+        providers.gradleProperty("truthlocksRuntimePath").orNull?.let { jetbrainsRuntimeLocal(it) }
+    }
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.2")
     testImplementation("io.mockk:mockk:1.13.9")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0")
 }
 
-intellij {
-    version.set("2024.1")
-    type.set("IC")
-    plugins.set(listOf("Git4Idea"))
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
-
-tasks {
-    withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-        kotlinOptions.jvmTarget = "17"
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
+        languageVersion = KotlinVersion.KOTLIN_1_9
+        apiVersion = KotlinVersion.KOTLIN_1_9
+        jvmDefault.set(JvmDefaultMode.NO_COMPATIBILITY)
     }
-
-    withType<Test> {
-        useJUnitPlatform()
+}
+intellijPlatform {
+    pluginConfiguration {
+        ideaVersion {
+            sinceBuild = "241"
+            untilBuild = "262.*"
+        }
     }
-
-    patchPluginXml {
-        sinceBuild.set("241")
-        untilBuild.set("243.*")
+    publishing { token = providers.environmentVariable("PUBLISH_TOKEN") }
+    signing {
+        certificateChain = providers.environmentVariable("CERTIFICATE_CHAIN")
+        privateKey = providers.environmentVariable("PRIVATE_KEY")
+        password = providers.environmentVariable("PRIVATE_KEY_PASSWORD")
     }
-
-    signPlugin {
-        certificateChain.set(System.getenv("CERTIFICATE_CHAIN"))
-        privateKey.set(System.getenv("PRIVATE_KEY"))
-        password.set(System.getenv("PRIVATE_KEY_PASSWORD"))
+    pluginVerification {
+        ides {
+            current()
+            create(IntelliJPlatformType.IntellijIdea, "2026.2.3")
+        }
     }
-
-    publishPlugin {
-        token.set(System.getenv("PUBLISH_TOKEN"))
+}
+tasks.withType<Test> { useJUnitPlatform() }
+tasks.verifyPlugin {
+    providers.gradleProperty("verifierJavaVersion").orNull?.let { version ->
+        javaLauncher.set(javaToolchains.launcherFor {
+            languageVersion.set(JavaLanguageVersion.of(version.toInt()))
+        })
     }
+    providers.gradleProperty("verificationArchive").orNull?.let {
+        archiveFile.set(layout.projectDirectory.file(it))
+    }
+}
+tasks.buildPlugin {
+    from("README.md") { into("maip-jetbrains") }
 }

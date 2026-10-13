@@ -17,7 +17,7 @@
 <idea-plugin>
     <id>com.truthlocks.maip</id>
     <name>MAIP - Machine Identity &amp; Integrity</name>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
     <vendor email="support@truthlocks.com" url="https://truthlocks.com">Truthlocks Inc</vendor>
 
     <description><![CDATA[
@@ -36,6 +36,12 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>1.2.0</h3>
+        <ul>
+            <li>Updated IntelliJ Platform build tooling and reproducible Gradle wrapper</li>
+            <li>Validated hosted receipt, signature, agent, trust and delegation reads</li>
+            <li>Redacted client configuration credentials and explicit session authentication precedence</li>
+        </ul>
         <h3>1.1.0</h3>
         <ul>
             <li>Hosted API contract updates; signature-aware verification and native audit export jobs</li>

@@ -65,10 +65,13 @@ class MAIPApiClient(private val config: MAIPConfig) {
         .addInterceptor { chain ->
             val original = chain.request()
             val augmented = original.newBuilder()
-                .header("X-API-Key", config.apiKey)
+                .apply {
+                    if (config.bearerToken.isNotBlank()) header("Authorization", "Bearer ${config.bearerToken}")
+                    else header("X-API-Key", config.apiKey)
+                }
 
                 .header("Accept", "application/json")
-                .header("User-Agent", "MAIP-JetBrains/1.1.0")
+                .header("User-Agent", "MAIP-JetBrains/1.2.0")
                 .build()
             chain.proceed(augmented)
         }

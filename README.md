@@ -6,23 +6,30 @@ Your API key is stored in the IDE's PasswordSafe; it is not written to settings 
 
 ## Build status and requirements
 
-Version 1.1.0 is undergoing hosted and IDE acceptance checks before publication.
-The plugin descriptor is restored and the distributable ZIP builds successfully.
-Publication and full interactive acceptance are not established by a successful build.
-The build targets Java 17 and IntelliJ Platform 2024.1, with declared build compatibility
-241 through 243.*. Newer IDE versions need separate compatibility validation.
+Version 1.2.0 builds successfully and passes 43 automated tests plus an opt-in
+hosted check of an existing QA receipt, its signature, agent, trust score and
+delegation relationships. This does not establish full interactive IDE acceptance.
+The plugin targets Java 17 and IntelliJ Platform 2024.1. Compatibility verification
+against the baseline and IntelliJ IDEA 2026.2.3 is required before publication.
 
 ## Developer commands
 
-With a compatible Gradle installation, run from this package directory:
+Use JDK 17 or newer. The checked-in wrapper pins Gradle 9.3.0 and verifies its
+distribution checksum. From this package directory:
 
 ```sh
-gradle test
-gradle buildPlugin
+./gradlew test
+./gradlew buildPlugin
+./gradlew verifyPlugin
 ```
 
-The ZIP is written to `build/distributions/maip-jetbrains-1.1.0.zip`. This checkout
-does not include a Gradle wrapper; Gradle 8.7 is used for validation.
+On Windows use `gradlew.bat` instead of `./gradlew`. The ZIP is written to
+`build/distributions/maip-jetbrains-1.2.0.zip`. The maintained IntelliJ Platform
+Gradle plugin builds the distribution and checks binary API compatibility.
+For local Windows runtime path-length issues, pass
+`-PtruthlocksRuntimePath=C:\short\path\to\jbr` with a compatible JetBrains Runtime.
+Publishing credentials belong in the `PUBLISH_TOKEN` environment variable, never
+in source or Gradle properties committed to Git.
 
 ## Configuration contract
 
@@ -84,7 +91,7 @@ both booleans set to `true`. Never paste a real key into a support report or rep
 | No agents or receipts | Refresh and check API connectivity; the IDE displays a limited result page. |
 | Export denied or unavailable | Check audit permissions and workspace export policy in Console. |
 | UNVERIFIABLE receipt | Retain that verdict; missing historical signing material cannot be treated as valid. |
-| Plugin incompatible | Check the declared 241–243.* platform range; newer IDEs need separate validation. |
+| Plugin incompatible | Check the compatible IDE range on the Marketplace release; do not bypass the IDE compatibility check. |
 | Credentials missing | Configure PasswordSafe; do not add a plaintext key to XML. |
 
 Documentation: [Truthlocks developer docs](https://docs.truthlocks.com).
